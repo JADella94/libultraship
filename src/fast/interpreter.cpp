@@ -2041,6 +2041,8 @@ void Interpreter::GfxDpSetScissor(uint32_t mode, uint32_t ulx, uint32_t uly, uin
     float y = lry / 4.0f;
     float width = (lrx - ulx) / 4.0f;
     float height = (lry - uly) / 4.0f;
+    const bool wasFbActive = mFbActive;
+    const bool isSmallTextScissor = width <= 96.0f && height <= 96.0f;
 
     mRdp->scissor.x = x;
     mRdp->scissor.y = y;
@@ -2048,6 +2050,20 @@ void Interpreter::GfxDpSetScissor(uint32_t mode, uint32_t ulx, uint32_t uly, uin
     mRdp->scissor.height = height;
 
     AdjustVIewportOrScissor(&mRdp->scissor);
+
+#ifdef USE_OPENGLES
+    if (!wasFbActive && isSmallTextScissor && mCurDimensions.height != 0) {
+        // GLES renders vertices after AdjXForAspectRatio. Do the matching
+        // centered X transform only for small text scissors; applying this to
+        // full-screen scissors clips the whole Android frame.
+        const float aspectScale = (4.0f / 3.0f) / ((float)mCurDimensions.width / (float)mCurDimensions.height);
+        if (aspectScale < 1.0f) {
+            const float centerX = (float)mCurDimensions.width * 0.5f;
+            mRdp->scissor.x = centerX + ((float)mRdp->scissor.x - centerX) * aspectScale;
+            mRdp->scissor.width *= aspectScale;
+        }
+    }
+#endif
 
     mRdp->viewport_or_scissor_changed = true;
 }
@@ -2732,9 +2748,13 @@ void Interpreter::Gfxs2dexRecyCopy(F3DuObjSprite* spr) {
 void* Interpreter::SegAddr(uintptr_t w1) {
     // Segmented?
     if (w1 & 1) {
-        uint32_t segNum = (uint32_t)(w1 >> 24);
+        uint32_t segNum = (uint32_t)((w1 >> 24) & 0xFF);
 
         uint32_t offset = w1 & 0x00FFFFFE;
+
+        if (segNum >= MAX_SEGMENT_POINTERS) {
+            return (void*)w1;
+        }
 
         if (mSegmentPointers[segNum] != 0) {
             return (void*)(mSegmentPointers[segNum] + offset);
