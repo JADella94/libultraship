@@ -629,6 +629,18 @@ void Gui::CalculateGameViewport() {
     mInterpreter.lock()->mGameWindowViewport.width = (int16_t)size.x;
     mInterpreter.lock()->mGameWindowViewport.height = (int16_t)size.y;
 
+#ifdef __ANDROID__
+    if (size.x > 0.0f && size.y > 0.0f && size.x < size.y) {
+        // BF [Port] Android portrait should render as a contained 4:3 game
+        // image. Do not move mGameWindowViewport here; the GLES/ImGui path
+        // expects the backend viewport to remain the full native surface.
+        mInterpreter.lock()->mCurDimensions.width =
+            (uint32_t)(size.x * mInterpreter.lock()->mCurDimensions.internal_mul);
+        mInterpreter.lock()->mCurDimensions.height =
+            (uint32_t)(floor(size.x * 3.0f / 4.0f) * mInterpreter.lock()->mCurDimensions.internal_mul);
+    }
+#endif
+
     if (Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_PREFIX_ADVANCED_RESOLUTION ".Enabled",
                                                                         0)) {
         ApplyResolutionChanges();
@@ -678,7 +690,21 @@ void Gui::DrawGame() {
     ImVec2 mainPos = ImGui::GetWindowPos();
     ImVec2 size = ImGui::GetContentRegionAvail();
     ImVec2 pos = ImVec2(0, 0);
-    if (Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_LOW_RES_MODE, 0) ==
+    bool useAndroidPortraitViewport = false;
+
+#ifdef __ANDROID__
+    if (size.x > 0.0f && size.y > 0.0f && size.x < size.y) {
+        // BF [Port] Match CalculateGameViewport(): portrait Android displays
+        // the 4:3 render target centered in the tall surface.
+        const float height = floor(size.x * 3.0f / 4.0f);
+        pos.y = floor((size.y - height) * 0.5f);
+        size.y = height;
+        useAndroidPortraitViewport = true;
+    }
+#endif
+
+    if (!useAndroidPortraitViewport &&
+        Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_LOW_RES_MODE, 0) ==
         1) { // N64 Mode takes priority
         const float sw = size.y * 320.0f / 240.0f;
         pos = ImVec2(floor(size.x / 2 - sw / 2), 0);
